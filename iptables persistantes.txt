@@ -1,0 +1,16 @@
+Pour avoir des règles iptables persistantes, vous pouvez utiliser une des méthodes suivantes:
+
+    Utiliser une extension pour enregistrer les règles iptables au démarrage du système. Sous Ubuntu, vous pouvez utiliser l'extension iptables-persistent.
+
+    Enregistrer les règles iptables dans un script de démarrage et les charger au démarrage du système. Vous pouvez créer un script de démarrage en utilisant les commandes iptables-save et iptables-restore.
+
+    Modifier le fichier de configuration iptables directement. Sous Ubuntu, le fichier de configuration se trouve généralement dans /etc/iptables/rules.v4. Vous pouvez y enregistrer les règles iptables que vous souhaitez utiliser de manière permanente.
+
+Il est important de noter que ces méthodes peuvent varier en fonction de votre distribution de Linux. Assurez-vous de vous référer à la documentation de votre distribution pour plus d'informations sur la façon de mettre en place des règles iptables persistantes.
+
+
+
+
+#########
+En root:
+iptables-save > /etc/iptables/rules.v4
