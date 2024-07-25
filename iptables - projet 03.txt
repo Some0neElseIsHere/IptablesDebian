@@ -1,0 +1,88 @@
+#!/bin/sh
+
+IPTABLES="/usr/sbin/iptables"
+
+# Permettre le routage sur le pare-feu
+echo "1" > /proc/sys/net/ipv4/ip_forward
+
+#############
+# Pour la definition des variables, on choisi une typologie de nommage
+# IFACE_ pour les interfaces reseau
+# IFACE_VLAN_ pour l'interface associee a un VLAN
+# IP_ pour une adresse IP (IP_FW_ pour l'adresse IP associee a l'interface reseau de la zone
+# NET_ pour un sous-reseau
+
+# Variables loopback local
+IFACE_LO="lo"
+IP_FW_LO="127.0.0.1"
+NET_ALL_INTERNE="192.168.10.0/24"
+
+# Variables pour la connexion Internet
+IFACE_INTERNET="enp0s3"
+IP_FW_INTERNET="192.168.1.34"
+
+# Variables pour la DMZ
+IFACE_VLAN_DMZ="enp0s9"
+IP_FW_VLAN_DMZ="192.168.10.6"
+NET_DMZ="192.168.10.4/30"
+IP_SRVWEB_VLAN_DMZ="192.168.10.6"
+
+# Variables pour les VLANs interne
+IFACE_VLAN_SRV_AD="enp0s8"
+IFACE_VLAN_POSTE_ADMIN="enp0s16"
+IFACE_VLAN_POSTE_USER="enp0s10"
+IP_FW_VLAN_SRV_AD="192.168.10.18"
+IP_FW_VLAN_PDT_ADMIN="192.168.10.10"
+IP_FW_VLAN_PDT_USER="192.168.10.14"
+NET_SRV_AD="192.168.10.16/30"
+NET_POSTE_ADMIN="192.168.10.8/30"
+NET_POSTE_USER="192.168.10.12/30"
+
+# Variables pour les VLAN ou sont heberges les serveurs metiers internes
+IP_SRV_AD="192.168.10.17"
+
+###########################################
+############# Début rédaction #############
+###########################################
+
+# Definition de la politique par defaut
+$IPTABLES -P INPUT DROP
+$IPTABLES -P OUTPUT DROP
+$IPTABLES -P FORWARD DROP
+
+# Autorisation du trafic pour l'interface locale de Loopback
+$IPTABLES -A INPUT -p ALL -i $IFACE_LO -s $IP_FW_LO -j ACCEPT
+$IPTABLES -A INPUT -p ALL -i $IFACE_LO -s $NET_ALL_INTERNE -j ACCEPT
+$IPTABLES -A INPUT -p ALL -i $IFACE_LO -s $IP_FW_INTERNET -j ACCEPT
+
+# NAT pour les echanges entre le proxy Web et Internet
+$IPTABLES -t nat -A POSTROUTING -o $IFACE_INTERNET -j MASQUERADE
+
+# Filtre les paquets avec des connexion établies ou liées
+$IPTABLES -A FORWARD -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+##ACCES WEB
+# Acces srv web depuis l'interne: OK - non testé
+$IPTABLES -A FORWARD -p TCP -i $IFACE_VLAN_POSTE_USER -o $IFACE_VLAN_DMZ -s $NET_POSTE_USER -d $IP_SRVWEB_VLAN_DMZ --dport 443 -j LOG --log-prefix "Web-interne: " -j ACCEPT
+$IPTABLES -A FORWARD -p TCP -i $IFACE_VLAN_POSTE_ADMIN -o $IFACE_VLAN_DMZ -s $NET_POSTE_ADMIN -d $IP_SRVWEB_VLAN_DMZ --dport 443 -j LOG --log-prefix "Web-interne: " -j ACCEPT
+# Acces ssh sur le serveur web pour l'administration
+$IPTABLES -A FORWARD -p TCP -i $IFACE_VLAN_POSTE_ADMIN -o $IFACE_VLAN_DMZ -s $NET_POSTE_ADMIN -d $IP_SRVWEB_VLAN_DMZ --dport 22 -j LOG --log-prefix "SSH-Web-interne: " -j ACCEPT
+# Acces srv web depuis l'externe: OK - non testé
+$IPTABLES -A FORWARD -p TCP -i $IFACE_INTERNET -o $IFACE_VLAN_DMZ -d $IP_SRVWEB_VLAN_DMZ --dport 443 -j LOG --log-prefix "Site Web: " -j ACCEPT
+
+##ACCES AD
+# Aux postes admin et users
+$IPTABLES -A FORWARD -p UDP -i $IFACE_VLAN_POSTE_USER -o $IFACE_VLAN_SRV_AD -d $IP_SRV_AD -m multiport --dport 53,88,135,137,138,389,445,1512 -j LOG --log-prefix "SRV-AD: " -j ACCEPT
+$IPTABLES -A FORWARD -p TCP -i $IFACE_VLAN_POSTE_USER -o $IFACE_VLAN_SRV_AD -d $IP_SRV_AD -m multiport --dport 53,88,135,137,139,389,445,464,636,1512,3268,3269 -j LOG --log-prefix "SRV-AD: " -j ACCEPT
+$IPTABLES -A FORWARD -p UDP -i $IFACE_VLAN_POSTE_ADMIN -o $IFACE_VLAN_SRV_AD -d $IP_SRV_AD -m multiport --dport 53,88,135,137,138,389,445,1512 -j LOG --log-prefix "SRV-AD: " -j ACCEPT
+$IPTABLES -A FORWARD -p TCP -i $IFACE_VLAN_POSTE_ADMIN -o $IFACE_VLAN_SRV_AD -d $IP_SRV_AD -m multiport --dport 53,88,135,137,139,389,445,464,636,1512,3268,3269 -j LOG --log-prefix "SRV-AD: " -j ACCEPT
+
+# Administration via SSH, DCE-RPC, Terminal Service et Web pour la DSI pour les postes, serveurs et equipements reseau
+$IPTABLES -A FORWARD -p TCP -i $IFACE_VLAN_POSTE_ADMIN -o $IFACE_VLAN_POSTE_USER -s $NET_POSTE_ADMIN -m multiport --dport 22,80,443,445,3389 -j ACCEPT -j LOG --log-prefix "Admin postes: "
+$IPTABLES -A FORWARD -p TCP -i $IFACE_VLAN_POSTE_ADMIN -o $IFACE_VLAN_SRV_AD -s $NET_POSTE_ADMIN -m multiport --dport 22,80,443,445,3389 -j LOG --log-prefix "Admin postes: " -j ACCEPT
+
+
+#### A SUPPRIMER A LA FIN
+#Mon accés perso.
+$IPTABLES -A INPUT -p TCP -i $IFACE_INTERNET -s 192.168.1.14 --dport 22 -j LOG --log-prefix "Mon accés: " -j ACCEPT
+$IPTABLES -A OUTPUT -p TCP -i $IFACE_INTERNET -s 192.168.1.14 --dport 22 -j LOG --log-prefix "Mon accés: " -j ACCEPT
